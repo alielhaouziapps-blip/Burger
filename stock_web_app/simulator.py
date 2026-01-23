@@ -5,11 +5,9 @@ def simulate_stock_price(initial_price, drift, volatility, time_period, dt=1/252
     """
     Simulates stock prices using Geometric Brownian Motion.
     """
-    # Calculate daily returns
     daily_returns = np.exp((drift - 0.5 * volatility**2) * dt +
                            volatility * np.sqrt(dt) * np.random.normal(0, 1, time_period))
 
-    # Create price series
     price_list = [initial_price]
     for x in daily_returns:
         price_list.append(price_list[-1] * x)
@@ -50,28 +48,35 @@ def backtest_strategy(data, initial_capital=100000.0):
 
     return portfolio
 
-def print_trade_ledger(portfolio):
+def get_trade_ledger(portfolio):
     """
-    Prints a daily ledger of trades.
+    Returns a list of trades.
     """
-    ledger = portfolio[portfolio['positions'] != 0]
-    for index, row in ledger.iterrows():
-        action = "Buy" if row['positions'] > 0 else "Sell"
-        print(f"{index.date()}: {action} {abs(row['positions'])} shares at {row['price']:.2f}")
+    # Filter out the initial row with NaN position
+    ledger = portfolio[portfolio['positions'].notna() & (portfolio['positions'] != 0)].copy()
+    ledger['action'] = np.where(ledger['positions'] > 0, 'Buy', 'Sell')
+    ledger['shares'] = ledger['positions'].abs()
+    ledger['date'] = ledger.index.strftime('%Y-%m-%d')
 
-def calculate_performance(portfolio, initial_capital):
+    return ledger[['date', 'action', 'shares', 'price']].to_dict('records')
+
+def get_performance_summary(portfolio, initial_capital):
     """
-    Calculates and prints the final portfolio performance.
+    Calculates and returns the final portfolio performance.
     """
     final_value = portfolio['total'].iloc[-1]
     returns = (final_value - initial_capital) / initial_capital * 100
 
-    print("\n--- Final Portfolio Performance ---")
-    print(f"Initial Capital: ${initial_capital:,.2f}")
-    print(f"Final Portfolio Value: ${final_value:,.2f}")
-    print(f"Total Return: {returns:.2f}%")
+    return {
+        "initial_capital": initial_capital,
+        "final_value": final_value,
+        "returns_pct": returns
+    }
 
-if __name__ == "__main__":
+def run_simulation():
+    """
+    Runs the full simulation and returns all relevant data.
+    """
     # Simulation parameters
     initial_price = 100.0
     drift = 0.05
@@ -79,21 +84,26 @@ if __name__ == "__main__":
     time_period = 252 * 2 # 2 years
     initial_capital = 100000.0
 
-    # Run the simulation
+    # Run the simulation pipeline
     prices = simulate_stock_price(initial_price, drift, volatility, time_period)
-
-    # Calculate moving averages
     data = calculate_moving_averages(prices)
-
-    # Generate trading signals
     signals = generate_trading_signals(data)
-
-    # Backtest the strategy
     portfolio = backtest_strategy(signals, initial_capital)
 
-    # Print the trade ledger
-    print("--- Trade Ledger ---")
-    print_trade_ledger(portfolio)
+    # Get results
+    ledger = get_trade_ledger(portfolio)
+    performance = get_performance_summary(portfolio, initial_capital)
 
-    # Calculate and print performance
-    calculate_performance(portfolio, initial_capital)
+    # Prepare data for frontend (e.g., for Chart.js)
+    chart_data = {
+        'labels': data.index.strftime('%Y-%m-%d').tolist(),
+        'prices': data['price'].tolist(),
+        'ma7': data['MA7'].tolist(),
+        'ma30': data['MA30'].tolist(),
+    }
+
+    return {
+        'chart_data': chart_data,
+        'ledger': ledger,
+        'performance': performance
+    }
